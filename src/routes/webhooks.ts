@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { enqueue } from "../queue/queue";
 import { createJob, getJob, getJobsByStatus, resetAttempts, updateJob } from "../store/jobStore";
-import { WebhookJob } from "../types";
+import { JobStatus, WebhookJob } from "../types";
 
 export const webhooksRouter = Router();
 
@@ -29,14 +29,14 @@ webhooksRouter.post("/webhooks", (req, res) => {
     id: `evt_${crypto.randomUUID()}`,
     url,
     payload,
-    status: "QUEUED",
+    status: JobStatus.QUEUED,
     createdAt: new Date(),
     updatedAt: new Date(),
     attempts: 0,
   };
   createJob(job);
   enqueue(job);
-  res.json({ id: job.id, status: "QUEUED" });
+  res.json({ id: job.id, status: JobStatus.QUEUED });
 });
 
 webhooksRouter.get("/webhooks/:id", (req, res) => {
@@ -49,8 +49,8 @@ webhooksRouter.get("/webhooks/:id", (req, res) => {
 });
 
 webhooksRouter.get("/webhooks", (req, res) => {
-  const status = req.query.status as WebhookJob['status'] | undefined;
-  if (!status || !['QUEUED', 'PROCESSING', 'DELIVERED', 'RETRYING', 'DEAD_LETTER'].includes(status)) {
+  const status = req.query.status as JobStatus | undefined;
+  if (!status || !Object.values(JobStatus).includes(status)) {
     res.status(400).json({ error: "status query param is required and must be a valid status" });
     return;
   }
@@ -64,12 +64,12 @@ webhooksRouter.post("/webhooks/:id/replay", (req, res) => {
         res.status(404).json({ error: "job not found" });
         return;
     }
-    if (job.status !== "DEAD_LETTER") {
+    if (job.status !== JobStatus.DEAD_LETTER) {
         res.status(400).json({ error: "only DEAD_LETTER jobs can be replayed" });
         return;
     }
-    updateJob(job.id, "QUEUED");
+    updateJob(job.id, JobStatus.QUEUED);
     resetAttempts(job.id);
     enqueue(job);
-    res.json({ id: job.id, status: "QUEUED" });
+    res.json({ id: job.id, status: JobStatus.QUEUED });
 });

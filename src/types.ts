@@ -1,8 +1,16 @@
+export enum JobStatus {
+    QUEUED = "QUEUED",
+    PROCESSING = "PROCESSING",
+    DELIVERED = "DELIVERED",
+    RETRYING = "RETRYING",
+    DEAD_LETTER = "DEAD_LETTER",
+}
+
 export interface WebhookJob {
     id: string;
     url: string;
     payload: unknown;
-    status: 'QUEUED' | 'PROCESSING' | 'DELIVERED' | 'RETRYING' | 'DEAD_LETTER';
+    status: JobStatus;
     createdAt: Date;
     updatedAt: Date;
     attempts: number;

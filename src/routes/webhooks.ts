@@ -32,6 +32,7 @@ webhooksRouter.post("/webhooks", (req, res) => {
     status: "QUEUED",
     createdAt: new Date(),
     updatedAt: new Date(),
+    attempts: 0,
   };
   createJob(job);
   enqueue(job);

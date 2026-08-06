@@ -1,5 +1,8 @@
 import { WebhookJob } from "../types";
-import { updateJob } from "../store/jobStore";
+import { incrementAttempts, updateJob } from "../store/jobStore";
+import { enqueue } from "../queue/queue";
+
+const MAX_ATTEMPTS = 3;
 
 export const processJob = async (job: WebhookJob): Promise<void> => {
   try {
@@ -22,7 +25,17 @@ export const processJob = async (job: WebhookJob): Promise<void> => {
     updateJob(job.id, "DELIVERED");
     console.log(`Job ${job.id} delivered successfully.`);
   } catch (error) {
-    updateJob(job.id, "FAILED");
-    console.error(`Job ${job.id} failed:`, error);
+    const attempts = incrementAttempts(job.id);
+    if (attempts < MAX_ATTEMPTS) {
+      console.log(`Will retry job ${job.id} (attempt ${attempts}) due to error:`, error);
+      updateJob(job.id, "RETRYING");
+
+      setTimeout(() => {
+        enqueue(job);
+      }, 1000 * attempts);
+    } else {
+        console.log(`Job ${job.id} has reached max attempts (${MAX_ATTEMPTS}). Marking as DEAD_LETTER.`);
+        updateJob(job.id, "DEAD_LETTER");
+    }
   }
 }

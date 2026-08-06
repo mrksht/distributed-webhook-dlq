@@ -19,3 +19,13 @@ export const updateJob = (id: string, status: WebhookJob['status']): boolean => 
   job.updatedAt = new Date();
   return true;
 }
+
+export const incrementAttempts = (id: string): number => {
+  const job = jobs.get(id);
+  if (!job) {
+    return 0;
+  }
+  job.attempts += 1;
+  job.updatedAt = new Date();
+  return job.attempts;
+}

@@ -29,3 +29,23 @@ export const incrementAttempts = (id: string): number => {
   job.updatedAt = new Date();
   return job.attempts;
 }
+
+export const resetAttempts = (id: string): boolean => {
+  const job = jobs.get(id);
+  if (!job) {
+    return false;
+  }
+  job.attempts = 0;
+  job.updatedAt = new Date();
+  return true;
+}
+
+export const getJobsByStatus = (status: WebhookJob['status']): WebhookJob[] => {
+  const result: WebhookJob[] = [];
+  for (const job of jobs.values()) {
+    if (job.status === status) {
+      result.push(job);
+    }
+  }
+  return result;
+}

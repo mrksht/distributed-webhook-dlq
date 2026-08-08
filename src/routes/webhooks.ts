@@ -1,10 +1,16 @@
 import { Router } from "express";
+import { apiKeyAuth } from "../auth/apiKey";
 import { enqueue } from "../queue/queue";
 import { assertUrlAllowed, SsrfBlockedError } from "../security/ssrfGuard";
 import { createJob, getJob, getJobsByStatus, resetAttempts, updateJob } from "../store/jobStore";
 import { JobStatus, WebhookJob } from "../types";
 
 export const webhooksRouter = Router();
+
+// Registered before any route definitions so the router is self-protecting regardless of
+// where/how it's mounted in index.ts -- the guarantee that no /webhooks route ships
+// unprotected is structural, not dependent on the mount call site remembering to wrap it.
+webhooksRouter.use(apiKeyAuth);
 
 webhooksRouter.post("/webhooks", async (req, res) => {
   const { url, payload } = req.body;

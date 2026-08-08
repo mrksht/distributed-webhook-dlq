@@ -11,6 +11,12 @@ import { JobStatus } from "../types";
 const readJson = async (response: Response): Promise<Record<string, unknown>> =>
   (await response.json()) as Record<string, unknown>;
 
+// This suite tests SSRF-guard integration, not auth (see auth/apiKey.test.ts for that) -- a
+// fixed key is set for the whole file's process (node:test runs each file in its own process)
+// so every request below just needs to send it.
+const TEST_API_KEY = "webhooks-test-suite-api-key";
+const authHeaders = { Authorization: `Bearer ${TEST_API_KEY}` };
+
 // A separate raw client purely for test cleanup -- jobStore.ts's own redis
 // client is module-private and doesn't expose a delete/close primitive.
 const redis = new Redis(redisConnection);
@@ -20,6 +26,8 @@ let server: Server;
 let baseUrl: string;
 
 test.before(async () => {
+  process.env.API_KEY = TEST_API_KEY;
+
   const app = express();
   app.use(express.json());
   app.use(webhooksRouter);
@@ -43,7 +51,7 @@ test.after(async () => {
 test("POST /webhooks: a URL resolving to a public IP behaves exactly as before (regression)", async () => {
   const response = await fetch(`${baseUrl}/webhooks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ url: "https://example.com/", payload: { hello: "world" } }),
   });
 
@@ -65,7 +73,7 @@ test("POST /webhooks: a URL resolving to a loopback IP is rejected with 400 and 
 
   const response = await fetch(`${baseUrl}/webhooks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ url: "http://127.0.0.1/", payload: { hello: "world" } }),
   });
 
@@ -84,7 +92,7 @@ test("POST /webhooks: a URL resolving to a link-local/cloud-metadata IP is rejec
 
   const response = await fetch(`${baseUrl}/webhooks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ url: "http://169.254.169.254/", payload: { hello: "world" } }),
   });
 
@@ -101,7 +109,7 @@ test("POST /webhooks: a URL resolving to a link-local/cloud-metadata IP is rejec
 test("POST /webhooks: the 400 body for a blocked url is a generic message, not the resolved IP or matched rule", async () => {
   const response = await fetch(`${baseUrl}/webhooks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ url: "http://169.254.169.254/", payload: { hello: "world" } }),
   });
 

@@ -196,7 +196,7 @@ catch (error):
 
 ## Implementation Units
 
-- [ ] U1. **Add minimal test infrastructure**
+- [x] U1. **Add minimal test infrastructure**
 
 **Goal:** Enable automated tests for the security-critical logic this phase introduces, without adding a new test framework dependency.
 
@@ -219,7 +219,7 @@ catch (error):
 
 ---
 
-- [ ] U2. **SSRF guard core module**
+- [x] U2. **SSRF guard core module**
 
 **Goal:** Build the core security primitive: a DNS-pinned, redirect-safe `fetch` replacement, plus a standalone hostname/URL check usable for fast creation-time feedback.
 
@@ -270,7 +270,7 @@ catch (error):
 
 ---
 
-- [ ] U3. **Wire SSRF guard into job creation and worker delivery**
+- [x] U3. **Wire SSRF guard into job creation and worker delivery**
 
 **Goal:** Integrate U2 at both call sites so no job can ever cause a request to a blocked destination, and blocked jobs don't waste retries.
 
@@ -305,7 +305,7 @@ catch (error):
 
 ---
 
-- [ ] U4. **API key authentication middleware**
+- [x] U4. **API key authentication middleware**
 
 **Goal:** Require a valid API key on every `/webhooks` route, structured so it can evolve into per-tenant keys later without a rewrite.
 
@@ -344,7 +344,7 @@ catch (error):
 
 ---
 
-- [ ] U5. **Environment/config documentation**
+- [x] U5. **Environment/config documentation**
 
 **Goal:** Document the new `API_KEY` requirement and SSRF guard behavior so the existing manual-testing workflow (and any future consumer) knows how to configure and understand this phase's changes.
 

@@ -15,7 +15,9 @@
   "dependencies": {
     "bullmq": "^6.0.9",
     "express": "^4.19.2",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "ipaddr.js": "^2.5.0",
+    "undici": "^6.23.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

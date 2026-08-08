@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { enqueue } from "../queue/queue";
+import { assertUrlAllowed, SsrfBlockedError } from "../security/ssrfGuard";
 import { createJob, getJob, getJobsByStatus, resetAttempts, updateJob } from "../store/jobStore";
 import { JobStatus, WebhookJob } from "../types";
 
@@ -18,6 +19,16 @@ webhooksRouter.post("/webhooks", async (req, res) => {
   } catch {
     res.status(400).json({ error: "url must be a valid URL" });
     return;
+  }
+
+  try {
+    await assertUrlAllowed(url);
+  } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
   }
 
   if (payload === undefined) {

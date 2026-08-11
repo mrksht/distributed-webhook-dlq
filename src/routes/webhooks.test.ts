@@ -106,6 +106,23 @@ test("POST /webhooks: a URL resolving to a link-local/cloud-metadata IP is rejec
   assert.deepEqual(newKeys, [], "no job key should have been written to the store for a blocked url");
 });
 
+test("POST /webhooks: a URL with an unresolvable hostname is not a policy block -- the request succeeds and the job is created (not a crash, not a 400)", async () => {
+  const response = await fetch(`${baseUrl}/webhooks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({
+      url: "http://this-domain-should-not-resolve-abc123xyz.invalid/",
+      payload: { hello: "world" },
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await readJson(response);
+  assert.equal(body.status, JobStatus.QUEUED);
+  assert.ok(typeof body.id === "string" && body.id.length > 0);
+  createdJobIds.push(body.id as string);
+});
+
 test("POST /webhooks: the 400 body for a blocked url is a generic message, not the resolved IP or matched rule", async () => {
   const response = await fetch(`${baseUrl}/webhooks`, {
     method: "POST",

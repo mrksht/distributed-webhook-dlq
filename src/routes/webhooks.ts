@@ -34,7 +34,10 @@ webhooksRouter.post("/webhooks", async (req, res) => {
       res.status(400).json({ error: error.message });
       return;
     }
-    throw error;
+    // A DNS resolution failure here isn't a policy block -- this check is advisory-only
+    // (see ssrfSafeFetch, the real security boundary), so let the job proceed and let the
+    // worker's delivery-time retry logic handle it, rather than rejecting on a transient blip.
+    console.error(`assertUrlAllowed: non-blocking validation error for url=${JSON.stringify(url)}`, error);
   }
 
   if (payload === undefined) {

@@ -69,7 +69,7 @@ Resets a `DEAD_LETTER` job's attempt count to `0` and re-enqueues it for a fresh
 | `PROCESSING` | A worker is actively attempting delivery |
 | `DELIVERED` | Destination responded with a successful (`2xx`) status |
 | `RETRYING` | Delivery failed, waiting for a backoff delay before the next attempt |
-| `DEAD_LETTER` | Delivery failed `MAX_ATTEMPTS` (3) times; requires manual replay to try again |
+| `DEAD_LETTER` | Delivery failed permanently; requires manual replay to try again. Usually after `MAX_ATTEMPTS` (3) ordinary failures, but a destination blocked by the SSRF guard (see [Security](#security)) reaches this after a single attempt, since retrying a policy violation would never succeed |
 
 ## How it works
 

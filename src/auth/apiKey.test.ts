@@ -202,3 +202,27 @@ test("GET /health mounted outside webhooksRouter (as in src/index.ts) remains ac
     }
   });
 });
+
+// The plan explicitly calls out the replay route as "easy to forget since it was added most
+// recently" -- test it (and GET /webhooks/:id) directly rather than relying only on the
+// router-wide registration being structurally correct.
+test("GET /webhooks/:id and POST /webhooks/:id/replay both require auth -> 401 with no Authorization header", async () => {
+  await withApiKey(TEST_API_KEY, async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(webhooksRouter);
+
+    const { server: mirrorServer, baseUrl: mirrorBaseUrl } = await listen(app);
+    try {
+      const getResponse = await fetch(`${mirrorBaseUrl}/webhooks/evt_does-not-exist`);
+      assert.equal(getResponse.status, 401);
+
+      const replayResponse = await fetch(`${mirrorBaseUrl}/webhooks/evt_does-not-exist/replay`, {
+        method: "POST",
+      });
+      assert.equal(replayResponse.status, 401);
+    } finally {
+      await closeServer(mirrorServer);
+    }
+  });
+});

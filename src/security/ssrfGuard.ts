@@ -20,8 +20,10 @@ const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 // ipaddr.js doesn't export its range-name types, so these are plain strings vs .range()'s return.
 const BLOCKED_IPV4_RANGES = new Set<string>(["private", "loopback", "linkLocal", "carrierGradeNat", "unspecified"]);
 
-// ::1, fc00::/7, fe80::/10 -- blocked outright, no decoding needed.
-const BLOCKED_IPV6_RANGES = new Set<string>(["loopback", "uniqueLocal", "linkLocal"]);
+// ::1, fc00::/7, fe80::/10, :: -- blocked outright, no decoding needed. "unspecified" (::) is the
+// IPv6 analog of 0.0.0.0 above and was missing here in an earlier version -- caught by review,
+// verified reachable to a loopback-bound server via http://[::]:<port>/.
+const BLOCKED_IPV6_RANGES = new Set<string>(["loopback", "uniqueLocal", "linkLocal", "unspecified"]);
 
 // TS can't narrow ipaddr.js's IPv4 | IPv6 union on a .kind() method call, only a discriminant property.
 const isIPv4Address = (addr: ipaddr.IPv4 | ipaddr.IPv6): addr is ipaddr.IPv4 => addr.kind() === "ipv4";
@@ -72,6 +74,12 @@ const isBlockedAddress = (address: string): boolean => {
   return embedded !== null && isBlockedIPv4(embedded);
 };
 
+// This bounds how long a caller waits, not the underlying dns.lookup call itself -- Node's
+// dns/promises has no cancellation, so a timed-out lookup keeps occupying a libuv threadpool slot
+// (default 4) until it resolves on its own. A handful of concurrent slow/black-holed-DNS
+// destinations can exhaust the threadpool and stall unrelated lookups app-wide. Flagged by review
+// (2 independent reviewers); accepted for now given no rate limiting exists yet in this phase --
+// worth addressing (concurrency cap, or dns.resolve4/6 instead of lookup) alongside rate limiting.
 const withTimeout = <T>(promise: Promise<T>, ms: number, message: string): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(message)), ms);
@@ -129,10 +137,15 @@ export const assertUrlAllowed = async (url: string): Promise<void> => {
 // as-is except for the hostname/servername override applied below.
 const defaultConnector = buildConnector({});
 
-// Module-scope singleton (matches queue.ts/jobStore.ts) -- rebuilding per call would forgo
-// connection-pool reuse for no benefit, since connect closes over nothing per-request.
-const dispatcher = new Agent({
-  connect(connectOpts, callback) {
+type Connector = ReturnType<typeof buildConnector>;
+
+// Exported (connector injectable, defaulting to the real one) so tests can verify the per-hop
+// resolve+classify+pin decision deterministically -- without it, proving that a redirect's target
+// gets independently re-validated would require a live two-hop network round trip where the
+// "allowed" hop is itself unblocked, which no local-only test server can be (any loopback-bound
+// server is blocked by the same classifier being tested).
+export const createConnectHandler = (connector: Connector = defaultConnector): Connector => {
+  return (connectOpts, callback) => {
     const originalHostname = connectOpts.hostname;
 
     resolveAndValidate(originalHostname).then(
@@ -144,7 +157,7 @@ const dispatcher = new Agent({
 
         // Pin the raw connection to the validated IP, but keep the original hostname as
         // `servername` so TLS SNI and cert verification still target the real host, not the IP.
-        defaultConnector(
+        connector(
           {
             ...connectOpts,
             hostname: result.addresses[0],
@@ -158,8 +171,12 @@ const dispatcher = new Agent({
         callback(dnsError, null);
       },
     );
-  },
-});
+  };
+};
+
+// Module-scope singleton (matches queue.ts/jobStore.ts) -- rebuilding per call would forgo
+// connection-pool reuse for no benefit, since connect closes over nothing per-request.
+const dispatcher = new Agent({ connect: createConnectHandler() });
 
 // Because `connect` above fires for every socket the dispatcher opens -- including a redirect to
 // a different origin -- this closes the redirect-based bypass with no separate redirect-handling

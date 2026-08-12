@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import dnsPromises from "node:dns/promises";
 import { NonRetryableError } from "../errors";
-import { assertUrlAllowed, resolveAndValidate, ssrfSafeFetch, SsrfBlockedError } from "./ssrfGuard";
+import { assertUrlAllowed, createConnectHandler, resolveAndValidate, ssrfSafeFetch, SsrfBlockedError } from "./ssrfGuard";
 
 // A domain guaranteed by RFC 2606 to never resolve, for NXDOMAIN scenarios.
 const UNRESOLVABLE_HOST = "this-domain-should-not-resolve-abc123xyz.invalid";
@@ -44,6 +44,10 @@ test("resolveAndValidate: link-local including cloud metadata is blocked", async
 test("resolveAndValidate: IPv6 unique-local and link-local are blocked", async () => {
   assert.equal((await resolveAndValidate("fc00::1")).blocked, true);
   assert.equal((await resolveAndValidate("fe80::1")).blocked, true);
+});
+
+test("resolveAndValidate: IPv6 unspecified address (::) is blocked -- the IPv6 analog of 0.0.0.0", async () => {
+  assert.equal((await resolveAndValidate("::")).blocked, true);
 });
 
 test("resolveAndValidate: IPv4-mapped IPv6 is blocked", async () => {
@@ -115,7 +119,15 @@ test("ssrfSafeFetch: unresolvable hostname rejects as an ordinary error, not Ssr
   );
 });
 
-test("ssrfSafeFetch: a redirect to a blocked address is rejected (the connect hook, not just a pre-check, does the work)", async () => {
+test("ssrfSafeFetch: a directly-requested blocked address is rejected via the connect hook", async () => {
+  // NOTE: this only proves the connect hook blocks a directly-requested blocked address -- it
+  // does NOT prove redirect-target re-validation, since the request target here (127.0.0.1) is
+  // itself loopback-blocked and rejects before any redirect could be followed. Proving "the
+  // redirect target gets independently re-validated" via a live two-hop request isn't possible
+  // with only local test infrastructure: any locally-reachable server is itself loopback-blocked
+  // by the same classifier under test, so there's no way to make the *first* hop succeed. See the
+  // "connect handler" test below, which verifies per-hostname re-validation deterministically
+  // instead, without depending on a real network round trip.
   const server = http.createServer((_req, res) => {
     res.writeHead(302, { Location: "http://169.254.169.254/secret" });
     res.end();
@@ -129,6 +141,49 @@ test("ssrfSafeFetch: a redirect to a blocked address is rejected (the connect ho
   } finally {
     server.close();
   }
+});
+
+test("connect handler: independently resolves and classifies every hostname it's invoked with -- proves per-hop re-validation without a live network round trip", async (t) => {
+  t.mock.method(dnsPromises, "lookup", async (hostname: string) => {
+    if (hostname === "allowed-hop.example") {
+      return [{ address: "93.184.216.34", family: 4 }];
+    }
+    return [{ address: "127.0.0.1", family: 4 }];
+  });
+
+  const connectorCalls: Array<{ hostname: string; servername?: string }> = [];
+  const fakeConnector = ((opts: { hostname: string; servername?: string }, callback: (err: Error | null, socket: null) => void) => {
+    connectorCalls.push({ hostname: opts.hostname, servername: opts.servername });
+    callback(null, null);
+  }) as Parameters<typeof createConnectHandler>[0];
+
+  const connect = createConnectHandler(fakeConnector);
+
+  // First "hop": an allowed hostname reaches the (fake) connector, pinned to the resolved IP,
+  // with the original hostname preserved as servername.
+  await new Promise<void>((resolve, reject) => {
+    connect({ hostname: "allowed-hop.example" } as Parameters<typeof connect>[0], (err: Error | null, _socket: unknown) =>
+      err ? reject(err) : resolve(),
+    );
+  });
+  assert.equal(connectorCalls.length, 1);
+  assert.equal(connectorCalls[0].hostname, "93.184.216.34");
+  assert.equal(connectorCalls[0].servername, "allowed-hop.example");
+
+  // Second "hop" (simulating a redirect target on the same dispatcher): a different, blocked
+  // hostname is independently resolved and rejected -- proving the handler doesn't cache or
+  // reuse the first hop's decision, which is exactly what happens across a real redirect since
+  // undici invokes connect fresh for each socket the dispatcher opens.
+  await assert.rejects(
+    () =>
+      new Promise((resolve, reject) => {
+        connect({ hostname: "still-blocked.example" } as Parameters<typeof connect>[0], (err: Error | null, _socket: unknown) =>
+          err ? reject(err) : resolve(undefined),
+        );
+      }),
+    SsrfBlockedError,
+  );
+  assert.equal(connectorCalls.length, 1, "a blocked hostname must never reach the connector");
 });
 
 test("ssrfSafeFetch: a blocked destination surfaces as SsrfBlockedError, and error instanceof NonRetryableError is true", async () => {

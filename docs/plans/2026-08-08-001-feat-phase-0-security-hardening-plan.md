@@ -1,7 +1,7 @@
 ---
 title: "Phase 0: Security Hardening (SSRF Protection + API Key Auth)"
 type: feat
-status: active
+status: completed
 date: 2026-08-08
 deepened: 2026-08-08
 ---

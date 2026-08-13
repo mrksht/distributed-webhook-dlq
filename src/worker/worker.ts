@@ -1,6 +1,8 @@
 import { JobStatus, WebhookJob } from "../types";
 import { incrementAttempts, updateJob } from "../store/jobStore";
 import { enqueue } from "../queue/queue";
+import { ssrfSafeFetch } from "../security/ssrfGuard";
+import { NonRetryableError } from "../errors";
 
 const MAX_ATTEMPTS = 3;
 
@@ -10,7 +12,7 @@ export const processJob = async (job: WebhookJob): Promise<void> => {
     await updateJob(job.id, JobStatus.PROCESSING);
     console.log(`Job ${job.id} is now in PROCESSING state.`);
 
-    const response = await fetch(job.url, {
+    const response = await ssrfSafeFetch(job.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -26,6 +28,13 @@ export const processJob = async (job: WebhookJob): Promise<void> => {
     console.log(`Job ${job.id} delivered successfully.`);
   } catch (error) {
     const attempts = await incrementAttempts(job.id);
+
+    if (error instanceof NonRetryableError) {
+      console.log(`Job ${job.id} failed with a non-retryable error. Marking as DEAD_LETTER.`, error);
+      await updateJob(job.id, JobStatus.DEAD_LETTER);
+      return;
+    }
+
     if (attempts < MAX_ATTEMPTS) {
       console.log(`Will retry job ${job.id} (attempt ${attempts}) due to error:`, error);
       await updateJob(job.id, JobStatus.RETRYING);

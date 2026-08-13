@@ -1,9 +1,16 @@
 import { Router } from "express";
+import { apiKeyAuth } from "../auth/apiKey";
 import { enqueue } from "../queue/queue";
+import { assertUrlAllowed, SsrfBlockedError } from "../security/ssrfGuard";
 import { createJob, getJob, getJobsByStatus, resetAttempts, updateJob } from "../store/jobStore";
 import { JobStatus, WebhookJob } from "../types";
 
 export const webhooksRouter = Router();
+
+// Registered before any route definitions so the router is self-protecting regardless of
+// where/how it's mounted in index.ts -- the guarantee that no /webhooks route ships
+// unprotected is structural, not dependent on the mount call site remembering to wrap it.
+webhooksRouter.use(apiKeyAuth);
 
 webhooksRouter.post("/webhooks", async (req, res) => {
   const { url, payload } = req.body;
@@ -18,6 +25,19 @@ webhooksRouter.post("/webhooks", async (req, res) => {
   } catch {
     res.status(400).json({ error: "url must be a valid URL" });
     return;
+  }
+
+  try {
+    await assertUrlAllowed(url);
+  } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    // A DNS resolution failure here isn't a policy block -- this check is advisory-only
+    // (see ssrfSafeFetch, the real security boundary), so let the job proceed and let the
+    // worker's delivery-time retry logic handle it, rather than rejecting on a transient blip.
+    console.error(`assertUrlAllowed: non-blocking validation error for url=${JSON.stringify(url)}`, error);
   }
 
   if (payload === undefined) {

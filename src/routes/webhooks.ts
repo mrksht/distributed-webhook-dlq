@@ -47,6 +47,7 @@ webhooksRouter.post("/webhooks", async (req, res) => {
 
   const job: WebhookJob = {
     id: `evt_${crypto.randomUUID()}`,
+    tenantId: req.tenant!.id,
     url,
     payload,
     status: JobStatus.QUEUED,
@@ -60,7 +61,7 @@ webhooksRouter.post("/webhooks", async (req, res) => {
 });
 
 webhooksRouter.get("/webhooks/:id", async (req, res) => {
-  const job = await getJob(req.params.id);
+  const job = await getJob(req.params.id, req.tenant!.id);
   if (!job) {
     res.status(404).json({ error: "job not found" });
     return;
@@ -75,11 +76,14 @@ webhooksRouter.get("/webhooks", async (req, res) => {
     return;
   }
 
-  res.json(await getJobsByStatus(status));
+  res.json(await getJobsByStatus(status, req.tenant!.id));
 });
 
 webhooksRouter.post("/webhooks/:id/replay", async (req, res) => {
-    const job = await getJob(req.params.id);
+    // Tenant check happens before the DEAD_LETTER-status check, deliberately -- so a cross-tenant
+    // caller sees the same 404 whether the job is "not yours" or "yours but not DEAD_LETTER"
+    // would have applied. Both branches must be indistinguishable from "doesn't exist".
+    const job = await getJob(req.params.id, req.tenant!.id);
     if (!job) {
         res.status(404).json({ error: "job not found" });
         return;

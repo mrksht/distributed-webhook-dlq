@@ -8,6 +8,7 @@ export enum JobStatus {
 
 export interface WebhookJob {
     id: string;
+    tenantId: string;
     url: string;
     payload: unknown;
     status: JobStatus;

@@ -20,6 +20,7 @@ const buildJob = (url: string): WebhookJob => {
   createdJobIds.push(id);
   return {
     id,
+    tenantId: "test-tenant",
     url,
     payload: { hello: "world" },
     status: JobStatus.QUEUED,
@@ -42,7 +43,7 @@ test("processJob: a url that passes creation-time validation but resolves to a b
 
   await processJob(job);
 
-  const stored = await getJob(job.id);
+  const stored = await getJob(job.id, job.tenantId);
   assert.equal(stored?.status, JobStatus.DEAD_LETTER);
   assert.equal(stored?.attempts, 1, "a blocked attempt still counts as an attempt");
 });
@@ -52,17 +53,17 @@ test("processJob: an ordinary delivery failure (unresolvable hostname) still goe
   await createJob(job);
 
   await processJob(job);
-  let stored = await getJob(job.id);
+  let stored = await getJob(job.id, job.tenantId);
   assert.equal(stored?.status, JobStatus.RETRYING);
   assert.equal(stored?.attempts, 1);
 
   await processJob(job);
-  stored = await getJob(job.id);
+  stored = await getJob(job.id, job.tenantId);
   assert.equal(stored?.status, JobStatus.RETRYING);
   assert.equal(stored?.attempts, 2);
 
   await processJob(job);
-  stored = await getJob(job.id);
+  stored = await getJob(job.id, job.tenantId);
   assert.equal(stored?.status, JobStatus.DEAD_LETTER);
   assert.equal(stored?.attempts, 3);
 });

@@ -187,7 +187,7 @@ test("apiKeyAuth: Bearer with an empty token -> 401", async () => {
 
 test("apiKeyAuth: incorrect key not present in any tenant's config -> 401", async () => {
   const response = await fetch(`${baseUrl}/protected`, {
-    headers: { Authorization: "Bearer x".repeat(TENANT_A_KEY.length) },
+    headers: { Authorization: `Bearer ${"x".repeat(TENANT_A_KEY.length)}` },
   });
   assert.equal(response.status, 401);
 });

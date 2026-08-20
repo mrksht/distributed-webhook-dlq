@@ -102,7 +102,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ## Implementation Units
 
-- [ ] U1. **Multi-key tenant lookup**
+- [x] U1. **Multi-key tenant lookup**
 
 **Goal:** Replace the single-secret `resolveTenant` check with a config-driven multi-tenant lookup.
 
@@ -140,7 +140,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U2. **Tenant-scoped job store**
+- [x] U2. **Tenant-scoped job store**
 
 **Goal:** Make ownership-aware lookups the only way to read a job from outside the store module — no unscoped `getJob`/`getJobsByStatus` remains exported.
 
@@ -180,7 +180,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U3. **Wire tenant scoping into the routes**
+- [x] U3. **Wire tenant scoping into the routes**
 
 **Goal:** Every `/webhooks` route uses the tenant-scoped store functions from U2 and the resolved tenant from U1 — no route reads or writes a job without going through them.
 
@@ -219,7 +219,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U4. **Config and docs**
+- [x] U4. **Config and docs**
 
 **Goal:** Document the `API_KEYS` format and the tenant-scoping behavior so the migration from Phase 0's single-key setup is unambiguous.
 

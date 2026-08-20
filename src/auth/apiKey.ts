@@ -90,6 +90,18 @@ export const resolveTenant = (key: string): Tenant | null => {
   return tenantId === undefined ? null : { id: tenantId };
 };
 
+// Turns the "apiKeyAuth always runs first" invariant into an explicit, named check instead of a
+// bare `req.tenant!.id` at each call site. Should never throw given the router-wide middleware
+// mount in webhooks.ts, but if that invariant is ever violated (e.g. a future route mounted
+// outside the router), this throws a clear error that index.ts's error-handling middleware turns
+// into a 500, rather than a raw non-null-assertion TypeError surfacing as an unhandled rejection.
+export const requireTenant = (req: Request): Tenant => {
+  if (!req.tenant) {
+    throw new Error("requireTenant called on a request apiKeyAuth did not authenticate");
+  }
+  return req.tenant;
+};
+
 // The only thing in this module that touches Express. Reads the Authorization header, defers
 // the actual key check to resolveTenant, and attaches the resulting tenant to req so
 // downstream handlers never need a signature change to become tenant-aware.

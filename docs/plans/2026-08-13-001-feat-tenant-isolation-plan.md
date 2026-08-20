@@ -1,7 +1,7 @@
 ---
 title: "Phase 1: Tenant Isolation"
 type: feat
-status: active
+status: completed
 date: 2026-08-13
 origin: docs/brainstorms/2026-08-13-tenant-isolation-requirements.md
 deepened: 2026-08-13

@@ -7,7 +7,16 @@ export const QUEUE_NAME = "webhook-deliveries";
 const queue = new Queue<WebhookJob>(QUEUE_NAME, { connection: redisConnection });
 
 export const enqueue = async (job: WebhookJob): Promise<void> => {
-  await queue.add("deliver", job, { attempts: 1 });
+  // removeOnComplete/removeOnFail: BullMQ otherwise retains every job's full data (including
+  // tenantId, url, payload) indefinitely in its own Redis keyspace, unscoped by tenant and
+  // outside jobStore.ts's scoping guarantees entirely. This narrows the retention window; it
+  // doesn't add tenant scoping to BullMQ's own data -- any future code that reads BullMQ job
+  // state directly (dashboards, admin tooling) must apply the same tenant check as the routes.
+  // removeOnFail keeps a bounded number of recent failures (rather than `true`, which deletes
+  // immediately) -- worker.ts's own error-handling calls (incrementAttempts/updateJob inside its
+  // catch block) are unguarded, so a Redis blip there could let a job reach BullMQ's "failed"
+  // state; a bounded trail keeps that case inspectable instead of erasing the only evidence.
+  await queue.add("deliver", job, { attempts: 1, removeOnComplete: true, removeOnFail: { count: 1000 } });
 };
 
 export const onJob = (handler: (job: WebhookJob) => Promise<void> | void): Worker<WebhookJob> => {

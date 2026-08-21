@@ -1,5 +1,5 @@
-import { Router } from "express";
-import { apiKeyAuth } from "../auth/apiKey";
+import { NextFunction, Request, Response, Router } from "express";
+import { apiKeyAuth, requireTenant } from "../auth/apiKey";
 import { enqueue } from "../queue/queue";
 import { assertUrlAllowed, SsrfBlockedError } from "../security/ssrfGuard";
 import { createJob, getJob, getJobsByStatus, resetAttempts, updateJob } from "../store/jobStore";
@@ -12,7 +12,15 @@ export const webhooksRouter = Router();
 // unprotected is structural, not dependent on the mount call site remembering to wrap it.
 webhooksRouter.use(apiKeyAuth);
 
-webhooksRouter.post("/webhooks", async (req, res) => {
+// Express 4 doesn't catch rejected promises from async handlers on its own -- a throw inside one
+// (e.g. requireTenant's invariant check) would otherwise become an unhandled rejection instead of
+// reaching index.ts's error-handling middleware. This wrapper is the minimal fix for that gap.
+const asyncHandler =
+  (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res).catch(next);
+  };
+
+webhooksRouter.post("/webhooks", asyncHandler(async (req, res) => {
   const { url, payload } = req.body;
 
   if (typeof url !== "string" || url.length === 0) {
@@ -47,6 +55,7 @@ webhooksRouter.post("/webhooks", async (req, res) => {
 
   const job: WebhookJob = {
     id: `evt_${crypto.randomUUID()}`,
+    tenantId: requireTenant(req).id,
     url,
     payload,
     status: JobStatus.QUEUED,
@@ -57,29 +66,32 @@ webhooksRouter.post("/webhooks", async (req, res) => {
   await createJob(job);
   await enqueue(job);
   res.json({ id: job.id, status: JobStatus.QUEUED });
-});
+}));
 
-webhooksRouter.get("/webhooks/:id", async (req, res) => {
-  const job = await getJob(req.params.id);
+webhooksRouter.get("/webhooks/:id", asyncHandler(async (req, res) => {
+  const job = await getJob(req.params.id, requireTenant(req).id);
   if (!job) {
     res.status(404).json({ error: "job not found" });
     return;
   }
   res.json(job);
-});
+}));
 
-webhooksRouter.get("/webhooks", async (req, res) => {
+webhooksRouter.get("/webhooks", asyncHandler(async (req, res) => {
   const status = req.query.status as JobStatus | undefined;
   if (!status || !Object.values(JobStatus).includes(status)) {
     res.status(400).json({ error: "status query param is required and must be a valid status" });
     return;
   }
 
-  res.json(await getJobsByStatus(status));
-});
+  res.json(await getJobsByStatus(status, requireTenant(req).id));
+}));
 
-webhooksRouter.post("/webhooks/:id/replay", async (req, res) => {
-    const job = await getJob(req.params.id);
+webhooksRouter.post("/webhooks/:id/replay", asyncHandler(async (req, res) => {
+    // Tenant check happens before the DEAD_LETTER-status check, deliberately -- so a cross-tenant
+    // caller sees the same 404 whether the job is "not yours" or "yours but not DEAD_LETTER"
+    // would have applied. Both branches must be indistinguishable from "doesn't exist".
+    const job = await getJob(req.params.id, requireTenant(req).id);
     if (!job) {
         res.status(404).json({ error: "job not found" });
         return;
@@ -92,4 +104,4 @@ webhooksRouter.post("/webhooks/:id/replay", async (req, res) => {
     await resetAttempts(job.id);
     await enqueue(job);
     res.json({ id: job.id, status: JobStatus.QUEUED });
-});
+}));

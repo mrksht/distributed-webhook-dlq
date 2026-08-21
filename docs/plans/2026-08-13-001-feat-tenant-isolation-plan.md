@@ -1,7 +1,7 @@
 ---
 title: "Phase 1: Tenant Isolation"
 type: feat
-status: active
+status: completed
 date: 2026-08-13
 origin: docs/brainstorms/2026-08-13-tenant-isolation-requirements.md
 deepened: 2026-08-13
@@ -32,7 +32,11 @@ Phase 0 (merged) built the extension point for this: `resolveTenant(key)` in `sr
 - R7. `POST /webhooks/:id/replay` is scoped the same way — `404` for a different tenant's job.
 - R8. All tenants share the same global operational behavior (`MAX_ATTEMPTS`, SSRF blocklist, backoff timing) — no per-tenant configuration in this phase.
 
-**Origin acceptance examples:** AE1 (covers R6, R7), AE2 (covers R5)
+**Origin acceptance examples:**
+- AE1 (covers R6, R7): Given tenant A created job `evt_123`, when tenant B calls `GET /webhooks/evt_123` or `POST /webhooks/evt_123/replay` with tenant B's valid key, then the response is `404 {"error": "job not found"}` — identical to querying an id that was never created.
+- AE2 (covers R5): Given tenant A has 3 jobs and tenant B has 5 jobs, when tenant A calls `GET /webhooks?status=QUEUED`, then only tenant A's matching jobs are returned, never tenant B's.
+
+(Reproduced here from the origin document so implementers don't have to cross-reference it — see `docs/brainstorms/2026-08-13-tenant-isolation-requirements.md` for the full origin.)
 
 ---
 
@@ -102,7 +106,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ## Implementation Units
 
-- [ ] U1. **Multi-key tenant lookup**
+- [x] U1. **Multi-key tenant lookup**
 
 **Goal:** Replace the single-secret `resolveTenant` check with a config-driven multi-tenant lookup.
 
@@ -140,7 +144,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U2. **Tenant-scoped job store**
+- [x] U2. **Tenant-scoped job store**
 
 **Goal:** Make ownership-aware lookups the only way to read a job from outside the store module — no unscoped `getJob`/`getJobsByStatus` remains exported.
 
@@ -180,7 +184,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U3. **Wire tenant scoping into the routes**
+- [x] U3. **Wire tenant scoping into the routes**
 
 **Goal:** Every `/webhooks` route uses the tenant-scoped store functions from U2 and the resolved tenant from U1 — no route reads or writes a job without going through them.
 
@@ -219,7 +223,7 @@ None — `docs/solutions/` does not exist in this repo yet.
 
 ---
 
-- [ ] U4. **Config and docs**
+- [x] U4. **Config and docs**
 
 **Goal:** Document the `API_KEYS` format and the tenant-scoping behavior so the migration from Phase 0's single-key setup is unambiguous.
 
@@ -295,11 +299,15 @@ None — `docs/solutions/` does not exist in this repo yet.
 
   <!-- dedup-key: section="key technical decisions risks dependencies" title="unscoped write primitives undercut the plans own centralized ownership check claim" evidence="u2s design leaves no unscoped variant exported from jobstore.ts the only unscoped fetch primitive is a private helper used" -->
 
+  **Accepted, not changed (2026-08-20):** kept as originally designed. All current call sites of `updateJob`/`incrementAttempts`/`resetAttempts` (traced in `src/routes/webhooks.ts` and `src/worker/worker.ts` during implementation and independently re-verified by a `ce-code-review` security pass) only ever reach these functions after an authorized, tenant-scoped `getJob`, or with a job id the worker already holds from the queue — never with attacker-controlled input and no prior check. Requiring `tenantId` on these three functions would force it into `worker.ts` and the Redis-key scheme, a tradeoff the plan's Key Technical Decisions already rejected for good reason. Left as a documented residual risk, not a bug.
+
 - **API_KEYS boot validation doesn't reject non-object JSON shapes** — Implementation Units - U1 / Key Technical Decisions (P1, feasibility/security-lens/adversarial, confidence 100)
 
   The plan's stated guard is "if `API_KEYS` is unset, empty, or fails `JSON.parse`" — but `JSON.parse('null')`, `JSON.parse('[]')`, `JSON.parse('"x"')`, and `JSON.parse('42')` all succeed without throwing while producing a value that isn't a valid apiKey-\>tenantId object. If the implementation then does something like `Object.entries(parsed)` on that result, it throws a `TypeError` at module-load time (before `app.listen` ever runs), which is exactly the whole-process crash the plan explicitly designed to avoid. The plan never extends the same fail-closed reasoning to this class of input. Flagged independently by three reviewers.
 
   <!-- dedup-key: section="implementation units u1 key technical decisions" title="api_keys boot validation doesnt reject non object json shapes" evidence="if api_keys is unset empty or fails json.parse log a clearly distinguishable error line and fall back to an" -->
+
+  **Resolved during implementation (2026-08-20):** `src/auth/apiKey.ts`'s `parseApiKeys` explicitly checks `typeof parsed !== "object" || parsed === null || Array.isArray(parsed)` before iterating, falling back to the same fail-closed empty-Map path. Covered by a dedicated test (`parseApiKeys: syntactically valid JSON that isn't a plain object...`) asserting `null`, `[]`, a JSON array, a bare string, and a number all fail closed without throwing.
 
 - **One malformed API_KEYS entry locks out every tenant, not just the bad one** — Key Technical Decisions (P2, feasibility/adversarial, confidence 100)
 
@@ -307,11 +315,15 @@ None — `docs/solutions/` does not exist in this repo yet.
 
   <!-- dedup-key: section="key technical decisions" title="one malformed api_keys entry locks out every tenant not just the bad one" evidence="reject treat as a parse failure same fail closed path above any parsed entry with an empty string key or empty" -->
 
+  **Resolved during implementation (2026-08-20):** implemented as per-entry skip, not whole-config invalidation — `parseApiKeys` drops only the malformed entry (empty key or tenant id) and keeps every other valid entry loaded, logging a count-only warning that never names the offending key or tenant id. Covered by a dedicated test (`parseApiKeys: one malformed entry... does not invalidate the rest`).
+
 - **Undefined acceptance criteria (AE1/AE2) referenced throughout test scenarios** — Requirements Trace / Implementation Units U2 and U3 (P2, coherence, confidence 100)
 
   The test scenarios reference "AE1" and "AE2" as proof of requirement coverage, but these acceptance criteria are never defined in this plan document. Implementers following this plan won't know what AE1 and AE2 actually require without consulting the external origin document.
 
   <!-- dedup-key: section="requirements trace implementation units u2 and u3" title="undefined acceptance criteria ae1ae2 referenced throughout test scenarios" evidence="requirements trace states origin acceptance examples ae1 covers r6 r7 ae2 covers r5 but does not define what ae1" -->
+
+  **Resolved (2026-08-20):** AE1 and AE2 are now reproduced in full under Requirements Trace, above, so readers no longer need to cross-reference the origin document to understand what the test scenarios prove.
 
 - **U3's BullMQ keyspace test has no established pattern to implement it** — Implementation Units - U3 Test scenarios (P2, feasibility, confidence 75)
 
@@ -319,8 +331,12 @@ None — `docs/solutions/` does not exist in this repo yet.
 
   <!-- dedup-key: section="implementation units u3 test scenarios" title="u3s bullmq keyspace test has no established pattern to implement it" evidence="integration after a job completes delivery its record no longer persists in bullmqs own redis keyspace confirms removeoncompleteremoveonfail" -->
 
+  **Resolved during implementation (2026-08-20):** added a new `src/queue/queue.test.ts`, scoped to `queue.ts` rather than folded into `webhooks.test.ts`, using a real `onJob` Worker + `enqueue` round trip with a poll-until-removed helper. Both `removeOnComplete` (job removed after success) and `removeOnFail` (job retained, bounded, after failure) are covered.
+
 - **Malformed-API_KEYS boot log may leak all tenant secrets to logs** — Key Technical Decisions / Open Questions / U1 Approach (P2, security-lens, confidence 75)
 
   The plan specifies fail-closed behavior for a malformed `API_KEYS` value and repeatedly says to "log a clearly distinguishable error line" but never states the log must exclude the raw env var value. Since `API_KEYS` is a single JSON blob containing every tenant's plaintext API key, the most natural way an implementer makes a parse failure "discoverable" is to log the offending string, which would dump every configured tenant's bearer token into application logs.
 
   <!-- dedup-key: section="key technical decisions open questions u1 approach" title="malformed api_keys boot log may leak all tenant secrets to logs" evidence="fail closed not crash on a parse problem if api_keys is unset empty or fails json.parse log a clearly distinguishable" -->
+
+  **Resolved during implementation (2026-08-20):** every log line in `parseApiKeys` reports only a reason string or a count of skipped entries — never a raw key or tenant id value. Independently verified by a `ce-code-review` security pass, which traced each log call site directly against the code.
